@@ -1,0 +1,7 @@
+# Node modules
+backend/node_modules/
+backend/.env
+
+# Next.js build output
+frontend/.next/
+frontend/node_modules/
