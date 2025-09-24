@@ -312,11 +312,6 @@
 
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
-import 'highlight.js/styles/github.css'; // pick whichever theme you like
-
 import { API_BASE } from '../../lib/api';
 import { useAuth } from '../../lib/authContext';
 
@@ -436,10 +431,8 @@ function ChatMessage({ m }) {
           ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white' 
           : 'bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-slate-600'
       }`}>
-        <div className={`prose prose-sm max-w-none break-words ${isUser ? 'prose-invert' : 'dark:prose-invert'}`}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-            {m.content || ''}
-          </ReactMarkdown>
+        <div className="whitespace-pre-wrap break-words">
+          {m.content || ''}
         </div>
 
         <div className={`text-xs mt-3 text-right ${
@@ -458,31 +451,47 @@ export default function AIPage() {
   const [current, setCurrent] = useState(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const token = typeof window !== 'undefined' ? localStorage.getItem('cq_token') : null;
 
   const chatScrollRef = useRef(null);
-  const chatContentRef = useRef(null); // used for PDF export
 
-  // fetch list of conversations
-  const fetchConversations = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/conversations`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
-      setConversations(data || []);
-      if (!current && data && data.length) setCurrent(data[0]);
-    } catch (err) {
-      console.error('fetchConversations', err);
-    }
+  // Mock data for demo purposes
+  const createNew = () => {
+    setCurrent({ 
+      messages: [], 
+      title: 'New Study Plan',
+      _id: 'demo-' + Date.now()
+    });
   };
 
-  useEffect(() => { 
-    if (user) {
-      fetchConversations();
-    }
-  }, [user]);
+  const sendMessage = async () => {
+    if (!input.trim()) return;
+    setLoading(true);
+    
+    // Add user message
+    const userMessage = {
+      role: 'user',
+      content: input,
+      createdAt: new Date().toISOString()
+    };
+    
+    // Mock AI response
+    const aiResponse = {
+      role: 'assistant',
+      content: `I understand you're asking about: "${input}"\n\nThis is a demo response. In a full implementation, this would connect to an AI service to provide personalized study plans, coding guidance, and educational content.\n\nSome suggestions based on your query:\n• Break down complex topics into smaller parts\n• Practice with hands-on coding exercises\n• Review fundamental concepts regularly\n• Track your progress over time`,
+      createdAt: new Date().toISOString()
+    };
+    
+    setTimeout(() => {
+      setCurrent(prev => ({
+        ...prev,
+        messages: [...(prev?.messages || []), userMessage, aiResponse]
+      }));
+      setInput('');
+      setLoading(false);
+    }, 1000);
+  };
 
-  // scroll to bottom when messages change
   useEffect(() => {
     if (!chatScrollRef.current) return;
     const t = setTimeout(() => {
@@ -491,327 +500,133 @@ export default function AIPage() {
     return () => clearTimeout(t);
   }, [current?.messages?.length, loading]);
 
-  // send user message
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-    setLoading(true);
-    try {
-      const body = {
-        conversationId: current?._id,
-        message: input,
-        title: current ? undefined : `Study: ${input.slice(0, 40)}`
-      };
-      const res = await fetch(`${API_BASE}/api/ai/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.details || 'Chat failed');
-
-      setCurrent(data.conversation);
-      setConversations(prev => {
-        const rest = prev.filter(c => c._id !== data.conversation._id);
-        return [data.conversation, ...rest];
-      });
-      setInput('');
-    } catch (err) {
-      alert(err.message || 'Send failed');
-      console.error('sendMessage error', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // load conversation details
-  const loadConversation = async (id) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/conversations/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
-      setCurrent(data);
-    } catch (err) {
-      console.error('loadConversation', err);
-    }
-  };
-
-  const createNew = () => {
-    setCurrent({ messages: [], title: 'New Study Plan' });
-  };
-
-  // Rename conversation
-  const renameConversation = async (id, newTitle) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/conversations/${id}`, {
-        method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify({ title: newTitle })
-      });
-      
-      if (!res.ok) throw new Error('Failed to rename conversation');
-      
-      // Update local state
-      setConversations(prev => prev.map(c => 
-        c._id === id ? { ...c, title: newTitle } : c
-      ));
-      
-      if (current && current._id === id) {
-        setCurrent(prev => ({ ...prev, title: newTitle }));
-      }
-    } catch (err) {
-      console.error('renameConversation', err);
-      alert('Failed to rename conversation');
-    }
-  };
-
-  // Delete conversation
-  const deleteConversation = async (id) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/conversations/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (!res.ok) throw new Error('Failed to delete conversation');
-      
-      // Update local state
-      setConversations(prev => prev.filter(c => c._id !== id));
-      
-      if (current && current._id === id) {
-        setCurrent(null);
-      }
-    } catch (err) {
-      console.error('deleteConversation', err);
-      alert('Failed to delete conversation');
-    }
-  };
-
-  // Download conversation as Markdown
-  const downloadMarkdown = async () => {
-    if (!current) return;
-    try {
-      const lines = [];
-      lines.push(`# ${current.title || 'Study Plan'}`);
-      lines.push('');
-      (current.messages || []).forEach(m => {
-        const who = m.role === 'user' ? 'User' : 'Assistant';
-        lines.push(`**${who}** — ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ''}`);
-        lines.push('');
-        lines.push(m.content || '');
-        lines.push('');
-        lines.push('---');
-        lines.push('');
-      });
-      const markdown = lines.join('\n');
-      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(current.title || 'conversation').replace(/\s+/g, '_').toLowerCase()}.md`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('downloadMarkdown', err);
-      alert('Failed to export markdown');
-    }
-  };
-
-  // Download conversation as PDF (using html2pdf.js dynamically)
-  const downloadPDF = async () => {
-    if (!current) return;
-    setExporting(true);
-    try {
-      const html2pdfModule = await import('html2pdf.js');
-      const html2pdf = html2pdfModule.default || html2pdfModule;
-
-      const node = chatContentRef.current;
-      if (!node) throw new Error('Chat content not found');
-
-      const clone = node.cloneNode(true);
-      clone.querySelectorAll('button, textarea, input').forEach(el => el.remove());
-
-      clone.style.background = '#ffffff';
-      clone.style.padding = '20px';
-      clone.style.color = '#111827';
-      clone.style.maxWidth = '800px';
-      clone.style.margin = '0 auto';
-
-      const wrap = document.createElement('div');
-      const titleEl = document.createElement('h1');
-      titleEl.innerText = current.title || 'Study Plan';
-      titleEl.style.fontFamily = 'sans-serif';
-      titleEl.style.fontSize = '20px';
-      titleEl.style.marginBottom = '12px';
-      wrap.appendChild(titleEl);
-      wrap.appendChild(clone);
-
-      const opt = {
-        margin:       10,
-        filename:     `${(current.title || 'conversation').replace(/\s+/g, '_').toLowerCase()}.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true },
-        jsPDF:        { unit: 'pt', format: 'a4', orientation: 'portrait' }
-      };
-
-      await html2pdf().set(opt).from(wrap).save();
-    } catch (err) {
-      console.error('downloadPDF', err);
-      alert('PDF export failed. See console for details.');
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  if (!user) return <div className="container py-8">Please log in to use the Study Planner AI.</div>;
-
-  return (
-    <main className="container py-8 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 bg-clip-text text-transparent">AI Study Planner</h2>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">Get personalized study plans and coding guidance from our intelligent assistant</p>
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
+        <div className="container py-8">
+          <div className="max-w-md mx-auto p-6 rounded-lg border bg-white dark:bg-gray-800 text-center">
+            <div className="text-4xl mb-4">🤖</div>
+            <h3 className="text-lg font-medium mb-2">Authentication Required</h3>
+            <p className="text-gray-600 dark:text-gray-400">Please log in to use the AI Study Planner.</p>
+          </div>
         </div>
       </div>
+    );
+  }
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <aside className="col-span-1">
-          {/* Conversations */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-slate-800 h-[85vh] overflow-auto shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div className="font-semibold text-gray-900 dark:text-gray-100">Conversations</div>
-              <button 
-                onClick={createNew} 
-                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-sm font-medium transition-all duration-200 shadow-sm hover:shadow-md"
-              >
-                + New
-              </button>
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
+      <div className="container py-8 max-w-6xl mx-auto">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h2 className="text-3xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 bg-clip-text text-transparent">AI Study Planner</h2>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">Get personalized study plans and coding guidance from our intelligent assistant</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <aside className="col-span-1">
+            <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-slate-800 h-[85vh] overflow-auto shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div className="font-semibold text-gray-900 dark:text-gray-100">Conversations</div>
+                <button 
+                  onClick={createNew} 
+                  className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-sm font-medium transition-all duration-200 shadow-sm hover:shadow-md"
+                >
+                  + New
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {current && (
+                  <div className="p-3 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-700/50">
+                    <div className="font-medium text-sm">{current.title}</div>
+                    <div className="text-xs text-gray-500 mt-1">Active conversation</div>
+                  </div>
+                )}
+                {!current && (
+                  <div className="text-center py-8">
+                    <div className="text-4xl mb-3">💬</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">No conversations yet</div>
+                    <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">Start a new chat to begin</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          <section className="col-span-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-slate-800 h-[85vh] flex flex-col shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-gray-200 dark:border-slate-600">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-sm">
+                  <span className="text-white text-lg">🤖</span>
+                </div>
+                <div>
+                  <div className="font-semibold text-gray-900 dark:text-gray-100">{current?.title || 'New Study Plan'}</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">AI-powered learning assistant</div>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              {conversations.map(c => (
-                <ConversationItem
-                  key={c._id}
-                  conversation={c}
-                  isActive={current && current._id === c._id}
-                  onSelect={() => loadConversation(c._id)}
-                  onRename={(newTitle) => renameConversation(c._id, newTitle)}
-                  onDelete={() => deleteConversation(c._id)}
-                />
-              ))}
-              {conversations.length === 0 && (
-                <div className="text-center py-8">
-                  <div className="text-4xl mb-3">💬</div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400">No conversations yet</div>
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">Start a new chat to begin</div>
+            <div className="flex-1 overflow-auto p-6" ref={chatScrollRef}>
+              {!current ? (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">🤖</div>
+                  <h3 className="text-lg font-medium text-gray-600 dark:text-gray-300 mb-2">
+                    Welcome to AI Study Planner
+                  </h3>
+                  <p className="text-sm text-gray-500 mb-6">
+                    Start a new conversation to get personalized study plans and coding guidance
+                  </p>
+                  <button 
+                    onClick={createNew}
+                    className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-lg hover:shadow-lg transition-all duration-200"
+                  >
+                    Start New Conversation
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  {(current?.messages || []).map((m, i) => (
+                    <ChatMessage key={i} m={m} />
+                  ))}
+                  {loading && <TypingIndicator />}
                 </div>
               )}
             </div>
-          </div>
-        </aside>
 
-        <section className="col-span-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-slate-800 h-[85vh] flex flex-col shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-slate-600">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-sm">
-                <span className="text-white text-lg">🤖</span>
-              </div>
-              <div>
-                <div className="font-semibold text-gray-900 dark:text-gray-100">{current?.title || 'New Study Plan'}</div>
-                <div className="text-sm text-gray-500 dark:text-gray-400">AI-powered learning assistant</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={downloadMarkdown} 
-                className="px-3 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-1"
-              >
-                <span>📄</span>
-                <span>Markdown</span>
-              </button>
-              <button 
-                onClick={downloadPDF} 
-                className="px-3 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-1" 
-                disabled={exporting}
-              >
-                <span>{exporting ? '⏳' : '📑'}</span>
-                <span>{exporting ? 'Exporting...' : 'PDF'}</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-auto mb-4" ref={chatScrollRef}>
-            {/* chat content area used for PDF export */}
-            <div ref={chatContentRef} className="px-2">
-              <div className="flex flex-col">
-                {(current?.messages || []).map((m, i) => <ChatMessage key={i} m={m} />)}
-                {loading && <TypingIndicator />}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-auto border-t border-gray-200 dark:border-slate-600 pt-4">
-            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask about study plans, topics, exercises, schedules, or any coding questions..."
-                className="w-full p-4 border border-gray-200 dark:border-slate-600 rounded-xl mb-4 bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 resize-none placeholder-gray-500 dark:placeholder-gray-400"
-                rows={3}
-              />
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                  <span>💡</span>
-                  <span>Ask academic questions for personalized study guidance</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={() => { setInput(''); }} 
-                    type="button" 
-                    className="px-4 py-2 border border-gray-200 dark:border-slate-600 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+            {current && (
+              <div className="p-6 border-t border-gray-200 dark:border-slate-600">
+                <div className="flex gap-3">
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Ask about study plans, coding topics, or request guidance..."
+                    className="flex-1 p-3 border border-gray-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    rows={3}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={loading || !input.trim()}
+                    className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Clear
-                  </button>
-                  <button 
-                    onClick={sendMessage} 
-                    disabled={loading || !input.trim()} 
-                    className="px-6 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
-                  >
-                    {loading ? (
-                      <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Thinking...</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span>Send</span>
-                        <span>🚀</span>
-                      </div>
-                    )}
+                    {loading ? 'Sending...' : 'Send'}
                   </button>
                 </div>
+                <div className="text-xs text-gray-500 mt-2">
+                  Press Enter to send, Shift+Enter for new line
+                </div>
               </div>
-            </div>
-          </div>
-        </section>
+            )}
+          </section>
+        </div>
       </div>
-
-      {/* Tiny animations for the typing dots (tailwind doesn't ship these by default) */}
-      <style jsx>{`
-        .animate-bounce-slow {
-          animation: bounce-slow 1s infinite ease-in-out;
-        }
-        .animation-delay-75 { animation-delay: .12s; }
-        .animation-delay-150 { animation-delay: .24s; }
-        @keyframes bounce-slow {
-          0%, 80%, 100% { transform: translateY(0); opacity: .6; }
-          40% { transform: translateY(-6px); opacity: 1; }
-        }
-      `}</style>
     </main>
   );
 }
