@@ -212,7 +212,25 @@ router.get('/', async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
-    const result = posts.map(p => ({ ...p, likeCount: (p.likes || []).length }));
+    
+    // Get comment counts for all posts
+    const postIds = posts.map(p => p._id);
+    const commentCounts = await Comment.aggregate([
+      { $match: { post: { $in: postIds } } },
+      { $group: { _id: '$post', count: { $sum: 1 } } }
+    ]);
+    
+    const commentCountMap = {};
+    commentCounts.forEach(cc => {
+      commentCountMap[cc._id.toString()] = cc.count;
+    });
+    
+    const result = posts.map(p => ({ 
+      ...p, 
+      likeCount: (p.likes || []).length,
+      dislikeCount: (p.dislikes || []).length,
+      commentCount: commentCountMap[p._id.toString()] || 0
+    }));
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -229,6 +247,7 @@ router.get('/:id', async (req, res) => {
     const comments = await Comment.find({ post: post._id }).populate('author', 'email').sort({ createdAt: 1 }).lean();
 
     post.likeCount = (post.likes || []).length;
+    post.dislikeCount = (post.dislikes || []).length;
     res.json({ post, comments });
   } catch (err) {
     console.error(err);
@@ -263,17 +282,90 @@ router.post('/:id/like', auth, async (req, res) => {
     const post = await Post.findById(req.params.id);
     if (!post) return res.status(404).json({ message: 'Post not found' });
 
-    const idx = post.likes.findIndex(id => id.toString() === userId.toString());
+    const likeIdx = post.likes.findIndex(id => id.toString() === userId.toString());
+    const dislikeIdx = post.dislikes.findIndex(id => id.toString() === userId.toString());
+    
     let liked = false;
-    if (idx >= 0) {
-      post.likes.splice(idx, 1);
+    
+    // Remove from dislikes if present
+    if (dislikeIdx >= 0) {
+      post.dislikes.splice(dislikeIdx, 1);
+    }
+    
+    // Toggle like
+    if (likeIdx >= 0) {
+      post.likes.splice(likeIdx, 1);
       liked = false;
     } else {
       post.likes.push(userId);
       liked = true;
     }
+    
     await post.save();
-    res.json({ liked, likeCount: post.likes.length });
+    res.json({ 
+      liked, 
+      disliked: false,
+      likeCount: post.likes.length,
+      dislikeCount: post.dislikes.length
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Toggle dislike
+router.post('/:id/dislike', auth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Post not found' });
+
+    const likeIdx = post.likes.findIndex(id => id.toString() === userId.toString());
+    const dislikeIdx = post.dislikes.findIndex(id => id.toString() === userId.toString());
+    
+    let disliked = false;
+    
+    // Remove from likes if present
+    if (likeIdx >= 0) {
+      post.likes.splice(likeIdx, 1);
+    }
+    
+    // Toggle dislike
+    if (dislikeIdx >= 0) {
+      post.dislikes.splice(dislikeIdx, 1);
+      disliked = false;
+    } else {
+      post.dislikes.push(userId);
+      disliked = true;
+    }
+    
+    await post.save();
+    res.json({ 
+      liked: false,
+      disliked, 
+      likeCount: post.likes.length,
+      dislikeCount: post.dislikes.length
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Delete post (only by author)
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Post not found' });
+    
+    // Check if user is the author
+    if (post.author.toString() !== req.userId.toString()) {
+      return res.status(403).json({ message: 'Not authorized to delete this post' });
+    }
+    
+    await post.deleteOne();
+    res.json({ message: 'Post deleted successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

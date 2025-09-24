@@ -338,10 +338,10 @@ const router = express.Router();
    Config (from .env)
    ------------------------- */
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'models/gemini-2.0-flash'; // set to exact model name from models list
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'; // set to exact model name from models list
 const GEMINI_BASES = [
-  process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta',
-  'https://generativelanguage.googleapis.com/v1beta2'
+  process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1'
+  // 'https://generativelanguage.googleapis.com/v1beta2'
 ];
 
 /* -------------------------
@@ -485,15 +485,20 @@ async function callGeminiRest(messages) {
 
   const promptText = messagesToPrompt(messages);
   const payload = {
-    contents: [{ parts: [{ text: promptText }] }],
-    temperature: 0.2
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: promptText }]
+      }
+    ],
+    generationConfig: { temperature: 0.2 }
   };
 
   let lastError = null;
 
   for (const base of GEMINI_BASES) {
     // Keep model slashes intact — do NOT encode slashes in model path
-    const rawUrl = `${base}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
+    const rawUrl = `${base}/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
     const url = encodeURI(rawUrl);
 
     console.info('[Gemini REST] Trying URL:', url);
@@ -636,16 +641,21 @@ router.get('/conversations/:id', auth, async (req, res) => {
   }
 });
 
-router.post('/conversations/:id/title', auth, async (req, res) => {
+// Update conversation title (PATCH method for better REST semantics)
+router.patch('/conversations/:id', auth, async (req, res) => {
   try {
     const conv = await Conversation.findById(req.params.id);
     if (!conv || String(conv.user) !== String(req.userId)) return res.status(404).json({ message: 'Not found' });
-    conv.title = req.body.title || conv.title;
-    await conv.save();
+    
+    if (req.body.title) {
+      conv.title = req.body.title;
+      await conv.save();
+    }
+    
     return res.json(conv);
   } catch (err) {
-    console.error('[AI] POST /conversations/:id/title error:', err);
-    return res.status(500).json({ message: 'Failed to rename' });
+    console.error('[AI] PATCH /conversations/:id error:', err);
+    return res.status(500).json({ message: 'Failed to update conversation' });
   }
 });
 
@@ -653,11 +663,62 @@ router.delete('/conversations/:id', auth, async (req, res) => {
   try {
     const conv = await Conversation.findById(req.params.id);
     if (!conv || String(conv.user) !== String(req.userId)) return res.status(404).json({ message: 'Not found' });
-    await conv.remove();
+    await conv.deleteOne();
     return res.json({ success: true });
   } catch (err) {
     console.error('[AI] DELETE /conversations/:id error:', err);
     return res.status(500).json({ message: 'Failed to delete' });
+  }
+});
+
+// Notes endpoints
+router.get('/notes', auth, async (req, res) => {
+  try {
+    // For simplicity, we'll store notes in a separate collection or as a special conversation
+    // Let's use a simple approach with a special conversation type
+    let notesConv = await Conversation.findOne({ 
+      user: req.userId, 
+      title: '__USER_NOTES__' 
+    }).lean();
+    
+    if (!notesConv) {
+      return res.json({ content: '' });
+    }
+    
+    // Get the latest message content as notes
+    const lastMessage = notesConv.messages[notesConv.messages.length - 1];
+    return res.json({ content: lastMessage?.content || '' });
+  } catch (err) {
+    console.error('[AI] GET /notes error:', err);
+    return res.status(500).json({ message: 'Failed to load notes' });
+  }
+});
+
+router.post('/notes', auth, async (req, res) => {
+  try {
+    const { content } = req.body;
+    
+    let notesConv = await Conversation.findOne({ 
+      user: req.userId, 
+      title: '__USER_NOTES__' 
+    });
+    
+    if (!notesConv) {
+      notesConv = new Conversation({
+        user: req.userId,
+        title: '__USER_NOTES__',
+        messages: []
+      });
+    }
+    
+    // Replace or add the notes content
+    notesConv.messages = [{ role: 'user', content: content || '' }];
+    await notesConv.save();
+    
+    return res.json({ success: true, content });
+  } catch (err) {
+    console.error('[AI] POST /notes error:', err);
+    return res.status(500).json({ message: 'Failed to save notes' });
   }
 });
 

@@ -1,53 +1,3 @@
-// 'use client';
-// import React, { useEffect, useRef, useState } from 'react';
-// import * as d3 from 'd3';
-
-// export default function SortingVisualizer({ isPlaying, speed=2 }){
-//   const svgRef = useRef();
-//   const [array, setArray] = useState([64,34,25,12,22,11,90]);
-//   const [comparing, setComparing] = useState([]);
-//   const [swapping, setSwapping] = useState([]);
-
-//   useEffect(()=>{
-//     const svg = d3.select(svgRef.current); svg.selectAll('*').remove();
-//     const width = 640, height = 260; const margin = {top:20,right:20,bottom:20,left:20};
-//     const x = d3.scaleBand().domain(array.map((_,i)=>i)).range([margin.left, width-margin.right]).padding(0.12);
-//     const y = d3.scaleLinear().domain([0, d3.max(array)||100]).range([height-margin.bottom, margin.top]);
-
-//     svg.selectAll('rect').data(array).enter().append('rect')
-//       .attr('x', (_,i)=>x(i)).attr('y', d=>y(d)).attr('width', x.bandwidth()).attr('height', d=>y(0)-y(d)).attr('rx',4).attr('fill','#111827');
-//     svg.selectAll('text').data(array).enter().append('text').attr('x', (_,i)=>x(i)+x.bandwidth()/2).attr('y', d=>y(d)-8).attr('text-anchor','middle').attr('fill','#fff').text(d=>d);
-//   }, [array, comparing, swapping]);
-
-//   useEffect(()=>{
-//     if (!isPlaying) return;
-//     let cancelled=false;
-//     const run = async ()=>{
-//       const arr=[...array];
-//       const n=arr.length;
-//       for(let i=0;i<n-1 && !cancelled;i++){
-//         for(let j=0;j<n-i-1 && !cancelled;j++){
-//           setComparing([j,j+1]);
-//           await new Promise(r=>setTimeout(r, 600/speed));
-//           if (arr[j]>arr[j+1]){
-//             setSwapping([j,j+1]); [arr[j],arr[j+1]]=[arr[j+1],arr[j]]; setArray([...arr]);
-//             await new Promise(r=>setTimeout(r, 600/speed));
-//           }
-//           setComparing([]); setSwapping([]);
-//         }
-//       }
-//     };
-//     run();
-//     return ()=> cancelled=true;
-//   }, [isPlaying, speed]);
-
-//   return (
-//     <div className="rounded-lg p-4 border bg-white dark:bg-gray-800">
-//       <svg ref={svgRef} width="100%" height={260} viewBox="0 0 640 260" />
-//     </div>
-//   );
-// }
-
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
@@ -56,24 +6,19 @@ function makeRandomArray(n = 8, min = 5, max = 99) {
   return Array.from({ length: n }, () => Math.floor(Math.random() * (max - min + 1)) + min);
 }
 
-export default function SortingVisualizer({ 
+export default function SelectionSortVisualizer({ 
   isPlaying = false, 
   speed = 2, 
-  size = 8, 
-  algorithm = 'bubble',
+  size = 8,
   onFinish = () => {} 
 }) {
   const svgRef = useRef();
-  const cancelRef = useRef(false);
   const [array, setArray] = useState([]);
-  const [comparing, setComparing] = useState([]);
-  const [swapping, setSwapping] = useState([]);
+  const [currentMin, setCurrentMin] = useState(-1);
+  const [comparing, setComparing] = useState(-1);
   const [sorted, setSorted] = useState([]);
   const [currentStep, setCurrentStep] = useState(0);
-  const [totalSteps, setTotalSteps] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
-
-  // Initialize array on mount
   useEffect(() => {
     generateNewArray();
   }, [size]);
@@ -85,12 +30,11 @@ export default function SortingVisualizer({
   };
 
   const reset = () => {
-    setComparing([]);
-    setSwapping([]);
+    setCurrentMin(-1);
+    setComparing(-1);
     setSorted([]);
     setCurrentStep(0);
     setIsComplete(false);
-    cancelRef.current = true;
   };
 
   const stepForward = () => {
@@ -99,7 +43,7 @@ export default function SortingVisualizer({
   };
 
   const stepBackward = () => {
-    // Manual step backward - simplified for now  
+    // Manual step backward - simplified for now
     console.log('Step backward clicked');
   };
 
@@ -134,8 +78,8 @@ export default function SortingVisualizer({
       .attr('rx', 6)
       .attr('fill', (_, i) => {
         if (sorted.includes(i)) return '#10b981';        // emerald for sorted
-        if (swapping.includes(i)) return '#ef4444';      // red for swapping
-        if (comparing.includes(i)) return '#f59e0b';     // amber for comparing
+        if (i === currentMin) return '#3b82f6';          // blue for current minimum
+        if (i === comparing) return '#f59e0b';           // amber for comparing
         return '#6b7280';                                // gray for default
       })
       .attr('stroke', '#374151')
@@ -153,7 +97,7 @@ export default function SortingVisualizer({
       .attr('font-size', '12')
       .text(d => d);
 
-  }, [array, comparing, swapping, sorted]);
+  }, [array, currentMin, comparing, sorted]);
 
   // Auto-play algorithm execution
   useEffect(() => {
@@ -166,44 +110,53 @@ export default function SortingVisualizer({
       const n = arr.length;
       
       for (let i = 0; i < n - 1 && !cancelled; i++) {
-        for (let j = 0; j < n - i - 1 && !cancelled; j++) {
+        let minIdx = i;
+        setCurrentMin(minIdx);
+        setComparing(-1);
+        
+        await new Promise(r => setTimeout(r, Math.max(300, 800 / speed)));
+        
+        for (let j = i + 1; j < n && !cancelled; j++) {
           if (cancelled) break;
           
           // Show comparison
-          setComparing([j, j + 1]);
-          setSwapping([]);
-          await new Promise(r => setTimeout(r, Math.max(300, 800 / speed)));
+          setComparing(j);
+          await new Promise(r => setTimeout(r, Math.max(200, 600 / speed)));
           
           if (cancelled) break;
           
-          if (arr[j] > arr[j + 1]) {
-            // Show swap
-            setSwapping([j, j + 1]);
-            setComparing([]);
-            [arr[j], arr[j + 1]] = [arr[j + 1], arr[j]];
-            setArray([...arr]);
-            await new Promise(r => setTimeout(r, Math.max(300, 800 / speed)));
+          if (arr[j] < arr[minIdx]) {
+            minIdx = j;
+            setCurrentMin(minIdx);
+            await new Promise(r => setTimeout(r, Math.max(200, 600 / speed)));
           }
-          
-          if (cancelled) break;
-          
-          // Clear highlights
-          setComparing([]);
-          setSwapping([]);
-          await new Promise(r => setTimeout(r, Math.max(100, 200 / speed)));
         }
         
         if (cancelled) break;
         
-        // Mark element as sorted
-        setSorted(prev => [...prev, n - 1 - i]);
+        // Clear comparison
+        setComparing(-1);
+        
+        // Perform swap if needed
+        if (minIdx !== i) {
+          [arr[i], arr[minIdx]] = [arr[minIdx], arr[i]];
+          setArray([...arr]);
+          await new Promise(r => setTimeout(r, Math.max(300, 800 / speed)));
+        }
+        
+        // Mark as sorted and clear highlights
+        setSorted(prev => [...prev, i]);
+        setCurrentMin(-1);
+        setComparing(-1);
+        
+        await new Promise(r => setTimeout(r, Math.max(200, 400 / speed)));
       }
       
       if (!cancelled) {
         // Mark all as sorted
         setSorted(Array.from({ length: n }, (_, i) => i));
-        setComparing([]);
-        setSwapping([]);
+        setCurrentMin(-1);
+        setComparing(-1);
         setIsComplete(true);
         onFinish();
       }
@@ -216,14 +169,10 @@ export default function SortingVisualizer({
     };
   }, [isPlaying, array, speed, onFinish]);
 
-  const algorithmName = algorithm === 'bubble' ? 'Bubble Sort' : 
-                       algorithm === 'selection' ? 'Selection Sort' : 
-                       'Sorting Algorithm';
-
   return (
     <div className="visualizer-container">
       <div className="visualizer-header">
-        <h3 className="visualizer-title">{algorithmName}</h3>
+        <h3 className="visualizer-title">Selection Sort</h3>
         <div className="visualizer-controls">
           <button 
             onClick={stepBackward}
@@ -275,8 +224,8 @@ export default function SortingVisualizer({
             <span>Comparing</span>
           </div>
           <div className="legend-item">
-            <div className="legend-color bg-red-500"></div>
-            <span>Swapping</span>
+            <div className="legend-color bg-blue-500"></div>
+            <span>Current Min</span>
           </div>
           <div className="legend-item">
             <div className="legend-color bg-emerald-500"></div>
